@@ -1,0 +1,85 @@
+ame: Build Mainline U-Boot
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Checkout Repository
+        uses: actions/checkout@v4
+        # If your build script needs other repos (like rkbin or TF-A)
+        # you might need to use a deeper checkout or clone them in the next step.
+
+      - name: 🛠️ Install Build Dependencies
+        run: |
+          sudo apt-get update
+          # Essential build tools and cross-compiler for arm64
+          sudo apt-get install -y git build-essential bison flex libssl-dev \
+            device-tree-compiler cpio unzip python3-dev \
+            crossbuild-essential-arm64
+        
+      - name: ⚙️ Clone External Dependencies (TF-A and Rockchip Binaries)
+        run: |
+          # Clone the official U-Boot mainline source (adjust as needed if you fork it)
+          git clone --depth 1 https://source.denx.de/u-boot/u-boot.git u-boot-mainline
+          
+          # Trusted Firmware-A (TF-A) - Essential for many modern ARM boards
+          git clone --depth 1 https://github.com/ARM-software/arm-trusted-firmware.git tf-a
+          
+          # Rockchip binary blobs (rkbin) - Contains DDR TPL/SPL, needed for Rockchip platforms
+          git clone --depth 1 https://github.com/rockchip-linux/rkbin.git rkbin
+          
+      - name: 🔨 Build Trusted Firmware-A (BL31)
+        working-directory: tf-a
+        run: |
+          # The platform name (e.g., rk3588) must match the TF-A port
+          make PLAT=rk3588 bl31 -j$(nproc)
+          
+      - name: 🏗️ Build U-Boot
+        working-directory: u-boot-mainline
+        run: |
+          # Set up cross-compilation environment variables
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          
+          # Point U-Boot to the necessary binary blobs
+          export BL31=${{ github.workspace }}/tf-a/build/rk3588/release/bl31/bl31.elf
+          # The TPL DDR blob path depends on the exact Rockchip model
+          export ROCKCHIP_TPL=${{ github.workspace }}/rkbin/bin/rk35/rk3588_ddr_lp4_2112MHz_lp5_2736MHz_v1.08.bin
+          
+          # Configure for your specific board (Example: a Rockchip RK3588 board config)
+          make rock5b-rk3588_defconfig
+          
+          # Build U-Boot and create the final u-boot.itb image
+          make -j$(nproc)
+          
+      - name: 📦 Merge Bootloader Images
+        working-directory: ${{ github.workspace }}
+        run: |
+          # Use the Rockchip boot_merger tool from rkbin to create idbloader.img
+          # The INI file depends on the SoC and board (this is an example path)
+          ./rkbin/tools/boot_merger RKBOOT/RK3588MINIALL.ini
+          
+          # The boot_merger tool outputs idbloader.img in the current directory (or u-boot-mainline)
+          # You may need to adjust paths based on where boot_merger saves the output
+          mv *spl_loader*.bin u-boot-mainline/
+          
+          cd u-boot-mainline
+          # Combine idbloader.img (SPL) and u-boot.itb (U-Boot proper) into a single flashable file (optional)
+          dd if=idbloader.img of=flashable_bootloader.img bs=512 seek=64
+          dd if=u-boot.itb of=flashable_bootloader.img bs=512 seek=16384 conv=notrunc
+          
+      - name: 📤 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: u-boot-artifacts
+          path: u-boot-mainline/*.img
