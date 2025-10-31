@@ -1,4 +1,4 @@
-ame: Build Mainline U-Boot
+name: Build Mainline U-Boot
 
 on:
   push:
