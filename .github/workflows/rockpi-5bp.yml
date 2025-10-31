@@ -25,7 +25,7 @@ jobs:
           # Essential build tools and cross-compiler for arm64
           sudo apt-get install -y git build-essential bison flex libssl-dev \
             device-tree-compiler cpio unzip python3-dev \
-            crossbuild-essential-arm64
+            crossbuild-essential-arm64 libgnutls28-dev
         
       - name: ⚙️ Clone External Dependencies (TF-A and Rockchip Binaries)
         run: |
